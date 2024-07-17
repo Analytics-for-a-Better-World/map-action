@@ -1,4 +1,3 @@
 venv/
 *.csv
 *.pdf
-ADD_REQUIREMENTS.txt
