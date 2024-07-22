@@ -1,4 +1,4 @@
-##### THIS FILE EXTRACTS AND CLEANS TABLES FROM A PDF FILE USING the gmft package.#####
+##### THIS FILE EXTRACTS AND CLEANS TABLES FROM A PDF FILE USING THE gmft PACKAGE.#####
 
 # NOTES regarding the code:
 # 1. The gmft package has a function which can extract the caption of a table. However this function does not work yet for 
@@ -6,13 +6,13 @@
 # Thus it might be something to keep in mind for future use.
 
 # 2. A strange problem was encountered when trying to save the tables in a different function then where they have been extracted.
-# Thus it was chosen to save the tables in the same function as where they were extracted them, even though this does not help the readability of the code.
+# Thus it was chosen to save the tables in the same function as where they were extracted (extract_tables_captions_and_save), 
+# even though this does not help the readability of the code.
 # -------------------------------------------------------------- 
 import fitz  # PyMuPDF
 import os
 import pandas as pd
 import re
-import tabula
 from datetime import datetime
 from gmft.pdf_bindings import PyPDFium2Document
 from gmft import CroppedTable, TableDetector
@@ -20,7 +20,6 @@ from gmft import AutoTableFormatter
 from gmft import AutoFormatConfig
 from gmft import TATRFormatConfig
 from IPython.display import display
-from tabula.io import read_pdf
 from unidecode import unidecode
 
 # Set the configuration for the table extraction
@@ -28,7 +27,10 @@ config = AutoFormatConfig()
 config.enable_multi_header = True
 config.semantic_spanning_cells = True
 TATRFormatConfig.force_large_table_assumption = False
+TATRFormatConfig.total_overlap_reject_threshold = 0.3
 config.large_table_assumption = False
+
+detector = TableDetector()
 
 formatter = AutoTableFormatter()
 
@@ -53,16 +55,24 @@ def obtain_pdf_path(pdf_name: str) -> str:
     return pdf_path
 
 def ingest_pdf(pdf_path) -> list[CroppedTable]:
-    doc = PyPDFium2Document(pdf_path)
+    """
+    Ingests a PDF document and extracts tables from it.
 
-    detector = TableDetector()
+    Args:
+        pdf_path (str): The file path of the PDF document to extract tables from.
+
+    Returns:
+        A list of CroppedTable objects representing the tables extracted from the PDF document.
+    """
+
+    doc = PyPDFium2Document(pdf_path)
 
     tables = []
     for page in doc:
         tables += detector.extract(page)
-    return tables
+    return tables, doc
 
-def extract_tables_and_captions(pdf_path, pdf_name, confidence_threshold = 0.995) -> list:
+def extract_tables_captions_and_save(pdf_path, pdf_name, confidence_threshold = 0.995) -> list:
     """
     Extracts tables and their corresponding captions from a PDF document.
 
@@ -73,9 +83,10 @@ def extract_tables_and_captions(pdf_path, pdf_name, confidence_threshold = 0.995
         A list of tuples, where each tuple contains a table caption (str) and a pandas DataFrame object representing the
         table data.
     """
-    tables = ingest_pdf(pdf_path)
+    tables, doc = ingest_pdf(pdf_path)
 
     pdf_document = fitz.open(pdf_path)
+    tables_and_possible_captions = []
     tables_and_captions = []
 
     # Loop through each page in the PDF document
@@ -93,32 +104,61 @@ def extract_tables_and_captions(pdf_path, pdf_name, confidence_threshold = 0.995
         for table in page_tables:
             table_bboxs.append((table.bbox, table))
 
-        # Find the captions for each table and add them to the output list
-        #TODO include logic on which lines to check
+        # Iterate over each table and its bounding box to find captions
         for bbox_table, table in table_bboxs:
-            # # Search for the caption above the table
-            # for i in range(line_index - 1, -1, -1):
+            # Iterate over each line in the page to search for possible captions
             for i in range(len(page_lines)):
                 candidate_caption = page_lines[i].strip()
-
                 candidate_caption_original = candidate_caption
 
                 # Make candidate caption lowercase and remove any leading or trailing punctuation
                 candidate_caption = candidate_caption.lower().strip(".,;:!?")
 
-                # Set candidate caption to only letters without accents
+                # Convert candidate caption to only letters without accents
                 candidate_caption = unidecode(candidate_caption)
 
-                # Check if the candidate caption is not empty and starts with "Table"
+                # Check if the candidate caption is a valid table caption
                 if candidate_caption.startswith(("table", "tableau", "table", "quadro", "tabela")) \
                     and 'below shows' not in candidate_caption\
                     and 'above shows' not in candidate_caption\
+                    and 'shows' not in candidate_caption\
                     and 'table des matieres' not in candidate_caption\
                     and 'indice' not in candidate_caption\
                     and 'índice' not in candidate_caption\
                     and re.search('\d', candidate_caption):
-                    tables_and_captions.append((candidate_caption_original, table))
-                    break
+                    tables_and_possible_captions.append((candidate_caption_original, table, page_number))
+
+            # Check if there are multiple possible captions for this table
+            possible_captions = [combi[0] for combi in tables_and_possible_captions if table == combi[1]]
+
+            # If there is exactly one caption, add it to the list
+            if len(possible_captions) == 1:
+                tables_and_captions.append((possible_captions[0], table, page_number))
+
+            # If there are multiple captions, find the closest one to the table    
+            elif len(possible_captions) > 1:
+                bbox_candidates = []
+                # Find bounding boxes for all possible captions
+                for possible_caption in possible_captions:
+                    bbox_candidate_caption = page.search_for(possible_caption)
+                    if bbox_candidate_caption:
+                        bbox_candidate_caption = bbox_candidate_caption[0]
+                        bbox_candidates.append((possible_caption, bbox_candidate_caption))
+
+                # Find the caption closest to the table based on bounding box distance
+                min_distance = float('inf')
+                closest_caption = None
+                for possible_caption, bbox_candidate_caption in bbox_candidates:
+                    distance = abs(bbox_candidate_caption.y1 - bbox_table[1])
+                    if distance < min_distance:
+                        min_distance = distance
+                        closest_caption = possible_caption
+                tables_and_captions.append((closest_caption, table, page_number))
+
+            # Continue to the next table if no possible captions were found    
+            else:
+                continue
+
 
     # Close the PDF document 
     pdf_document.close()
@@ -130,16 +170,18 @@ def extract_tables_and_captions(pdf_path, pdf_name, confidence_threshold = 0.995
 
     os.makedirs(folder_path, exist_ok=True)
 
-    tables_and_captions_above_threshold = [(caption, table) for caption, table in tables_and_captions if table.confidence_score >= confidence_threshold]
+    tables_and_captions_above_threshold = [(caption, table, page_number) for caption, table, page_number in tables_and_captions if table.confidence_score >= confidence_threshold]  
 
     # Save each table as a CSV file
-    for caption, table in tables_and_captions_above_threshold:
+    for caption, table, page_number in tables_and_captions_above_threshold:
         # Remove any invalid characters from the filename
         sanitized_filename = "".join([c if c.isalnum() else "_" for c in caption])
-        sanitized_filename = f"{sanitized_filename}.csv"
-        
+        sanitized_filename = f"{sanitized_filename}_PAGE_NUMBER_{page_number+1}.csv"
+
         # Extract the table from the formatted text using the extractor function
         ft = formatter.extract(table)
+        
+        # Try/except is included such that in case of an error, the code will not stop and it outputs which table caused the error
         try:
             # Set an option to display the DataFrame without multi-level indexing
             with pd.option_context('display.multi_sparse', False):
@@ -150,21 +192,21 @@ def extract_tables_and_captions(pdf_path, pdf_name, confidence_threshold = 0.995
 
             # Save the table as a CSV file in the folder, choose encoding="ANSI" for French characters
             df_table.to_csv(os.path.join(folder_path, sanitized_filename), index=False, sep=";", encoding="utf-8")
-        except Exception as e:
-            print(f"Error saving table '{caption}': {e}")
+        except:
+            print(f"Error in saving table: {caption}")
 
     return tables_and_captions
 
 # Main function
 def main():
     # Define the name of the PDF you want to extract tables from
-    pdf_name = 'Madagascar pag 58-73.pdf'
+    pdf_name = 'Madagascar - DHS Health 2021 - FR.pdf'
 
     # Obtain the path of the PDF file to extract tables from
     pdf_path = obtain_pdf_path(pdf_name)
-
+    
     # Extract the tables and captions from the PDF document
-    tables_and_captions = extract_tables_and_captions(pdf_path, pdf_name)
+    tables_and_captions = extract_tables_captions_and_save(pdf_path, pdf_name)
     
     # # In case tables and captions are found, save them as CSV files and clean them
     if not tables_and_captions:
