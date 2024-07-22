@@ -180,22 +180,27 @@ def extract_tables_captions_and_save(pdf_path, pdf_name, confidence_threshold = 
 
         # Extract the table from the formatted text using the extractor function
         ft = formatter.extract(table)
-        # Set an option to display the DataFrame without multi-level indexing
-        with pd.option_context('display.multi_sparse', False):
-            # Convert the formatted text to a pandas DataFrame
-            df_table = ft.df()
-            # Replace any NaN values in the DataFrame with an empty string
-            df_table.fillna("", inplace=True)
+        
+        # Try/except is included such that in case of an error, the code will not stop and it outputs which table caused the error
+        try:
+            # Set an option to display the DataFrame without multi-level indexing
+            with pd.option_context('display.multi_sparse', False):
+                # Convert the formatted text to a pandas DataFrame
+                df_table = ft.df()
+                # Replace any NaN values in the DataFrame with an empty string
+                df_table.fillna("", inplace=True)
 
-        # Save the table as a CSV file in the folder, choose encoding="ANSI" for French characters
-        df_table.to_csv(os.path.join(folder_path, sanitized_filename), index=False, sep=";", encoding="utf-8")
+            # Save the table as a CSV file in the folder, choose encoding="ANSI" for French characters
+            df_table.to_csv(os.path.join(folder_path, sanitized_filename), index=False, sep=";", encoding="utf-8")
+        except:
+            print(f"Error in saving table: {caption}")
 
     return tables_and_captions
 
 # Main function
 def main():
     # Define the name of the PDF you want to extract tables from
-    pdf_name = 'Eswatini - Census 2017 - Vol 5 - EN.pdf'
+    pdf_name = 'Madagascar - DHS Health 2021 - FR.pdf'
 
     # Obtain the path of the PDF file to extract tables from
     pdf_path = obtain_pdf_path(pdf_name)
