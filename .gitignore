@@ -1,3 +1,5 @@
 venv/
+test-venv/
+test-venv2/
 *.csv
 *.pdf
