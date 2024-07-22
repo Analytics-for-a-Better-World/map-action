@@ -86,6 +86,7 @@ def extract_tables_captions_and_save(pdf_path, pdf_name, confidence_threshold = 
     tables, doc = ingest_pdf(pdf_path)
 
     pdf_document = fitz.open(pdf_path)
+    tables_and_possible_captions = []
     tables_and_captions = []
 
     # Loop through each page in the PDF document
@@ -103,23 +104,20 @@ def extract_tables_captions_and_save(pdf_path, pdf_name, confidence_threshold = 
         for table in page_tables:
             table_bboxs.append((table.bbox, table))
 
-        # Find the captions for each table and add them to the output list
-        #TODO include logic on which lines to check
+        # Iterate over each table and its bounding box to find captions
         for bbox_table, table in table_bboxs:
-            # # Search for the caption above the table
-            # for i in range(line_index - 1, -1, -1):
+            # Iterate over each line in the page to search for possible captions
             for i in range(len(page_lines)):
                 candidate_caption = page_lines[i].strip()
-
                 candidate_caption_original = candidate_caption
 
                 # Make candidate caption lowercase and remove any leading or trailing punctuation
                 candidate_caption = candidate_caption.lower().strip(".,;:!?")
 
-                # Set candidate caption to only letters without accents
+                # Convert candidate caption to only letters without accents
                 candidate_caption = unidecode(candidate_caption)
 
-                # Check if the candidate caption is not empty and starts with "Table"
+                # Check if the candidate caption is a valid table caption
                 if candidate_caption.startswith(("table", "tableau", "table", "quadro", "tabela")) \
                     and 'below shows' not in candidate_caption\
                     and 'above shows' not in candidate_caption\
@@ -128,8 +126,39 @@ def extract_tables_captions_and_save(pdf_path, pdf_name, confidence_threshold = 
                     and 'indice' not in candidate_caption\
                     and 'índice' not in candidate_caption\
                     and re.search('\d', candidate_caption):
-                    tables_and_captions.append((candidate_caption_original, table, page_number))
-                    break
+                    tables_and_possible_captions.append((candidate_caption_original, table, page_number))
+
+            # Check if there are multiple possible captions for this table
+            possible_captions = [combi[0] for combi in tables_and_possible_captions if table == combi[1]]
+
+            # If there is exactly one caption, add it to the list
+            if len(possible_captions) == 1:
+                tables_and_captions.append((possible_captions[0], table, page_number))
+
+            # If there are multiple captions, find the closest one to the table    
+            elif len(possible_captions) > 1:
+                bbox_candidates = []
+                # Find bounding boxes for all possible captions
+                for possible_caption in possible_captions:
+                    bbox_candidate_caption = page.search_for(possible_caption)
+                    if bbox_candidate_caption:
+                        bbox_candidate_caption = bbox_candidate_caption[0]
+                        bbox_candidates.append((possible_caption, bbox_candidate_caption))
+
+                # Find the caption closest to the table based on bounding box distance
+                min_distance = float('inf')
+                closest_caption = None
+                for possible_caption, bbox_candidate_caption in bbox_candidates:
+                    distance = abs(bbox_candidate_caption.y1 - bbox_table[1])
+                    if distance < min_distance:
+                        min_distance = distance
+                        closest_caption = possible_caption
+                tables_and_captions.append((closest_caption, table, page_number))
+
+            # Continue to the next table if no possible captions were found    
+            else:
+                continue
+
 
     # Close the PDF document 
     pdf_document.close()
