@@ -81,6 +81,7 @@ def extract_tables_and_captions(pdf_path) -> list:
         try:
             tables = tabula.read_pdf(pdf_path, pages=page_number + 1, multiple_tables=True) # , java_options=java_options
         except:
+            print(f"No tables can be found. Check whether you put .pdf at the end of the file name and if the file name is correct.")
             continue
         # Find the lines on the current page that contain table content
         table_lines = []

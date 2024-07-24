@@ -17,8 +17,12 @@ The requirements.txt file provides all the necessary python packages for this pr
      - `pip install virtualenv`
     - cd folder/path/you/want/venv/in 
     - `python -m venv myenv`
-    - cd myenv/Scripts
-    - `activate.bat`
+    - Change directory to: 
+        - (Windows:) cd myenv/Scripts 
+        - (Linux:) cd myenv/lib
+    - Activate your newly created myenv by:
+        - (Windows:) `activate.bat` 
+        - (Linux:) `activate`
     - cd folder/path/to/requirements/file
 
 To perform the following step, it's essential that you already cloned the repo.
